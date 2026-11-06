@@ -3,6 +3,7 @@
 
 import argparse
 import json
+import signal
 import time
 import urllib.request
 import uuid
@@ -50,12 +51,18 @@ def main():
     args = parser.parse_args()
     args.log.parent.mkdir(parents=True, exist_ok=True)
     rows, gaps = [], []
+    stop_requested = False
+    def stop_monitor(_signum, _frame):
+        nonlocal stop_requested
+        stop_requested = True
+    signal.signal(signal.SIGTERM, stop_monitor)
+    signal.signal(signal.SIGINT, stop_monitor)
     started = time.monotonic()
     previous = None
     with args.log.open("w", encoding="utf-8") as output:
         output.write("분리수거 서비스 무중단 배포 관측 로그 (UTF-8)\n")
         output.write(f"검증 주소: {args.url}\n관측 시작: {timestamp()}\n요청 간격 목표: 1초\n\n")
-        while time.monotonic() - started < args.duration:
+        while time.monotonic() - started < args.duration and not stop_requested:
             request_started = time.monotonic()
             row = check(args.url)
             if previous is not None:

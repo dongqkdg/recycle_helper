@@ -71,8 +71,8 @@ jobs:
             wait "$(cat deploy-evidence/monitor.pid)" 2>/dev/null || true
           fi
           echo "## 배포 실행 결과" >> deploy-evidence/summary.md
-          echo "- 배포 단계: `${{ steps.deploy.outcome }}`" >> deploy-evidence/summary.md
-          echo "- 컨테이너: `${CONTAINER_NAME}` / 포트 `${HOST_PORT}`" >> deploy-evidence/summary.md
+          echo "- 배포 단계: ${{ steps.deploy.outcome }}" >> deploy-evidence/summary.md
+          echo "- 컨테이너: ${CONTAINER_NAME} / 포트 ${HOST_PORT}" >> deploy-evidence/summary.md
           cat deploy-evidence/summary.md >> "$GITHUB_STEP_SUMMARY"
           cat deploy-evidence/monitor.log
       - name: Upload UTF-8 deployment evidence
