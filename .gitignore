@@ -20,3 +20,6 @@ test-images/
 *.jpeg
 *.png
 *.webp
+# GitHub Actions self-hosted runner files (runner is normally installed outside this repo).
+actions-runner/
+_work/

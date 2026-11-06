@@ -1,0 +1,57 @@
+name: Deploy Docker image to self-hosted runner
+
+on:
+  workflow_run:
+    workflows: ["Build and publish Docker image"]
+    types: [completed]
+
+env:
+  IMAGE_NAME: ${{ secrets.DOCKERHUB_USERNAME }}/recycle-helper
+  CONTAINER_NAME: recycling-classifier
+  HOST_PORT: "8000"
+
+jobs:
+  deploy:
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    runs-on: self-hosted
+    permissions:
+      contents: read
+
+    steps:
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Pull the image built by CI
+        env:
+          IMAGE_TAG: ${{ github.event.workflow_run.head_sha }}
+        run: docker pull "${IMAGE_NAME}:${IMAGE_TAG}"
+
+      - name: Replace running container
+        env:
+          IMAGE_TAG: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -eu
+          image="${IMAGE_NAME}:${IMAGE_TAG}"
+          docker rm -f "${CONTAINER_NAME}" 2>/dev/null || true
+          docker run -d \
+            --name "${CONTAINER_NAME}" \
+            --restart unless-stopped \
+            -p "${HOST_PORT}:8000" \
+            "${image}"
+
+      - name: Verify the deployed service
+        run: |
+          set -eu
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent --show-error "http://127.0.0.1:${HOST_PORT}/" >/dev/null; then
+              echo "Deployment is healthy on port ${HOST_PORT}."
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "Service did not become ready. Container logs:" >&2
+          docker logs "${CONTAINER_NAME}" >&2
+          exit 1
