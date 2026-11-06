@@ -1,5 +1,6 @@
 from pathlib import Path
 import io
+import os
 from typing import Annotated
 
 from fastapi import FastAPI, Request
@@ -8,6 +9,7 @@ from fastapi.staticfiles import StaticFiles
 from PIL import Image, UnidentifiedImageError
 
 ROOT = Path(__file__).parent
+DEPLOY_VERSION = os.getenv("DEPLOY_VERSION", "개발환경")
 app = FastAPI(title="분리수거 AI 분류기")
 app.mount("/static", StaticFiles(directory=ROOT / "static"), name="static")
 
@@ -62,7 +64,7 @@ async def api_classify(request: Request):
     content_type = request.headers.get("content-type", "")
     body = await request.body()
     if "multipart/form-data" not in content_type:
-        return {"ok": False, "error": "multipart/form-data 형식의 이미지 업로드가 필요합니다."}
+        return {"ok": False, "error": "multipart/form-data 형식의 이미지 업로드가 필요합니다.", "version": DEPLOY_VERSION}
     boundary = content_type.split("boundary=", 1)[-1].encode()
     parts = body.split(b"--" + boundary)
     file_type, filename, data = None, "uploaded-image", b""
@@ -77,14 +79,14 @@ async def api_classify(request: Request):
         data = payload.rstrip(b"\r\n-")
         break
     if not file_type or not file_type.startswith("image/"):
-        return {"ok": False, "error": "JPG, PNG, WEBP 등 이미지 파일만 업로드할 수 있습니다."}
+        return {"ok": False, "error": "JPG, PNG, WEBP 등 이미지 파일만 업로드할 수 있습니다.", "version": DEPLOY_VERSION}
     if len(data) > 10 * 1024 * 1024:
-        return {"ok": False, "error": "이미지는 10MB 이하만 업로드할 수 있습니다."}
+        return {"ok": False, "error": "이미지는 10MB 이하만 업로드할 수 있습니다.", "version": DEPLOY_VERSION}
     try:
         image = Image.open(io.BytesIO(data)).convert("RGB")
         category, confidence, model = classify(image, filename)
         if category == "분류 불가":
-            return {"ok": False, "error": "분류 모델이 설치되지 않았습니다. torch와 torchvision을 설치한 뒤 다시 실행하세요.", "model": model}
-        return {"ok": True, "category": category, "confidence": confidence, "guide": GUIDES[category], "model": model, "filename": filename}
+            return {"ok": False, "error": "분류 모델이 설치되지 않았습니다. torch와 torchvision을 설치한 뒤 다시 실행하세요.", "model": model, "version": DEPLOY_VERSION}
+        return {"ok": True, "category": category, "confidence": confidence, "guide": GUIDES[category], "model": model, "filename": filename, "version": DEPLOY_VERSION}
     except (UnidentifiedImageError, OSError):
-        return {"ok": False, "error": "이미지 파일을 읽을 수 없습니다. 손상되지 않은 파일을 선택하세요."}
+        return {"ok": False, "error": "이미지 파일을 읽을 수 없습니다. 손상되지 않은 파일을 선택하세요.", "version": DEPLOY_VERSION}

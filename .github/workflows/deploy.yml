@@ -16,42 +16,72 @@ jobs:
     runs-on: self-hosted
     permissions:
       contents: read
-
     steps:
+      - name: Check out monitoring code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
       - name: Log in to Docker Hub
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-      - name: Pull the image built by CI
-        env:
-          IMAGE_TAG: ${{ github.event.workflow_run.head_sha }}
-        run: docker pull "${IMAGE_NAME}:${IMAGE_TAG}"
-
-      - name: Replace running container
+      - name: Start independent monitoring before service change
+        run: |
+          mkdir -p deploy-evidence
+          nohup python3 scripts/monitor_service.py \
+            --url "http://127.0.0.1:${HOST_PORT}" --duration 60 \
+            --log deploy-evidence/monitor.log --summary deploy-evidence/summary.md \
+            > deploy-evidence/monitor-console.log 2>&1 &
+          echo $! > deploy-evidence/monitor.pid
+          sleep 3
+          echo "독립 모니터링 프로세스 시작: PID $(cat deploy-evidence/monitor.pid)"
+      - name: Pull and replace service container
+        id: deploy
+        continue-on-error: true
         env:
           IMAGE_TAG: ${{ github.event.workflow_run.head_sha }}
         run: |
           set -eu
           image="${IMAGE_NAME}:${IMAGE_TAG}"
+          echo "[배포] 변경 시작: $(date -Is)" | tee -a deploy-evidence/monitor.log
+          docker pull "${image}"
           docker rm -f "${CONTAINER_NAME}" 2>/dev/null || true
-          docker run -d \
-            --name "${CONTAINER_NAME}" \
-            --restart unless-stopped \
-            -p "${HOST_PORT}:8000" \
-            "${image}"
-
-      - name: Verify the deployed service
-        run: |
-          set -eu
+          docker run -d --name "${CONTAINER_NAME}" --restart unless-stopped \
+            -p "${HOST_PORT}:8000" -e "DEPLOY_VERSION=${IMAGE_TAG}" "${image}"
+          echo "[배포] 새 컨테이너 기동: 버전=${IMAGE_TAG}, 시각=$(date -Is)" | tee -a deploy-evidence/monitor.log
           for attempt in $(seq 1 30); do
             if curl --fail --silent --show-error "http://127.0.0.1:${HOST_PORT}/" >/dev/null; then
-              echo "Deployment is healthy on port ${HOST_PORT}."
-              exit 0
+              echo "[배포] 정상 응답 확인: $(date -Is)" | tee -a deploy-evidence/monitor.log
+              break
             fi
             sleep 2
           done
-          echo "Service did not become ready. Container logs:" >&2
-          docker logs "${CONTAINER_NAME}" >&2
-          exit 1
+      - name: Keep monitoring for 30 seconds after deployment
+        if: always()
+        run: |
+          echo "[배포] 완료 후 30초 관측 시작: $(date -Is)" | tee -a deploy-evidence/monitor.log
+          sleep 30
+          echo "[배포] 완료 후 30초 관측 종료: $(date -Is)" | tee -a deploy-evidence/monitor.log
+      - name: Stop monitor and collect summary
+        if: always()
+        run: |
+          if [ -f deploy-evidence/monitor.pid ]; then
+            kill "$(cat deploy-evidence/monitor.pid)" 2>/dev/null || true
+            wait "$(cat deploy-evidence/monitor.pid)" 2>/dev/null || true
+          fi
+          echo "## 배포 실행 결과" >> deploy-evidence/summary.md
+          echo "- 배포 단계: `${{ steps.deploy.outcome }}`" >> deploy-evidence/summary.md
+          echo "- 컨테이너: `${CONTAINER_NAME}` / 포트 `${HOST_PORT}`" >> deploy-evidence/summary.md
+          cat deploy-evidence/summary.md >> "$GITHUB_STEP_SUMMARY"
+          cat deploy-evidence/monitor.log
+      - name: Upload UTF-8 deployment evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: deployment-evidence-${{ github.event.workflow_run.head_sha }}
+          path: deploy-evidence/
+          if-no-files-found: warn
+      - name: Fail if deployment failed
+        if: steps.deploy.outcome == 'failure'
+        run: exit 1
