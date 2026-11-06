@@ -79,18 +79,27 @@ def main():
             time.sleep(max(0, 1 - (time.monotonic() - request_started)))
     success_count = sum(row["analysis_ok"] for row in rows)
     max_gap = max(gaps, default=0)
+    verdict = "SUCCESS" if rows and success_count == len(rows) else "FAILURE"
     summary = [
-        "## 배포 무중단 검증 요약", "",
-        f"- 검증 주소: `{args.url}`",
-        f"- 관측 종료: `{timestamp()}`",
-        f"- 전체 요청: **{len(rows)}건** (성공 {success_count}건 / 실패 {len(rows) - success_count}건)",
-        "- 실제 요청 간격 목표: 1초",
-        f"- 최대 기록 공백: **{max_gap}ms** (공백 구간은 검증되지 않은 구간)",
-        f"- 관측 범위 무중단 판정: **{'통과' if rows and success_count == len(rows) else '실패'}**", "",
-        "### 대표 응답", "",
+        "# 분리수거 서비스 배포 검증", "",
+        f"**결과: {verdict}**  |  검증 주소: {args.url}",
+        f"관측 종료: {timestamp()}  |  전체 요청: **{len(rows)}건**  |  성공: **{success_count}건**  |  실패: **{len(rows) - success_count}건**",
+        f"요청 간격 목표: 1초  |  최대 기록 공백: **{max_gap}ms**  |  공백 구간은 검증되지 않은 구간으로 표시됨", "",
+        "## 배포 전 / 중 / 후 대표 응답", "",
+        "| 구간 | 요청(성공/전체) | 대표 요청 | 시작 시각 | HTTP | 분석 | 배포 버전 | 결과 |",
+        "|---|---:|---:|---|---:|:---:|---|:---:|",
     ]
-    for label, row in [("배포 전/첫 요청", rows[0] if rows else None), ("배포 중/중간 요청", rows[len(rows) // 2] if rows else None), ("배포 후/마지막 요청", rows[-1] if rows else None)]:
-        summary.append(f"- {label}: " + (f"상태 {row['status']}, {row['response_ms']}ms, 분석={'정상' if row['analysis_ok'] else '실패'}, 버전 `{row['version']}`" if row else "기록 없음"))
+    total = len(rows)
+    sections = [("배포 전", rows[0:1]), ("배포 중", rows[1:max(1, total - 1)]), ("배포 후", rows[-1:])]
+    for label, section in sections:
+        if not section:
+            summary.append(f"| {label} | 0/0 | - | - | - | - | - | 미관측 |")
+            continue
+        representative = section[len(section) // 2]
+        ok_count = sum(item["analysis_ok"] for item in section)
+        index = rows.index(representative) + 1
+        summary.append(f"| {label} | {ok_count}/{len(section)} | #{index} | {representative['start']} | {representative['status']} | {'정상' if representative['analysis_ok'] else '실패'} | {representative['version']} | {'성공' if representative['analysis_ok'] else '실패'} |")
+    summary += ["", f"**관측 범위 무중단 판정: {('통과' if verdict == 'SUCCESS' else '실패')}**", "", "전체 원문 요청 로그는 이 실행의 Artifact에서 UTF-8로 제공합니다."]
     args.summary.write_text("\n".join(summary) + "\n", encoding="utf-8")
     print("\n".join(summary), flush=True)
 
