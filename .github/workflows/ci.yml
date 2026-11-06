@@ -32,6 +32,26 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
+      - name: Evaluate fixed model-update dataset
+        run: |
+          python -m pip install -r ml_requirements.txt
+          python evaluate_model_update.py
+
+      - name: Upload model evaluation report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: model-evaluation-${{ github.sha }}
+          path: model-evaluation/
+          if-no-files-found: warn
+
+      - name: Add model comparison to job summary
+        if: always()
+        run: |
+          if [ -f model-evaluation/summary.md ]; then
+            cat model-evaluation/summary.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+
       - name: Build image and run model smoke test
         uses: docker/build-push-action@v6
         with:

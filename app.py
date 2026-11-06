@@ -10,6 +10,7 @@ from PIL import Image, UnidentifiedImageError
 
 ROOT = Path(__file__).parent
 DEPLOY_VERSION = os.getenv("DEPLOY_VERSION", "개발환경")
+MODEL_NAME = os.getenv("MODEL_NAME", "efficientnet_b0")
 app = FastAPI(title="분리수거 AI 분류기")
 app.mount("/static", StaticFiles(directory=ROOT / "static"), name="static")
 
@@ -27,9 +28,16 @@ def classify(image: Image.Image, filename: str = ""):
     """Use MobileNetV3 when torchvision is available; otherwise provide a transparent demo fallback."""
     try:
         import torch
-        from torchvision.models import MobileNet_V3_Small_Weights, mobilenet_v3_small
-        weights = MobileNet_V3_Small_Weights.DEFAULT
-        model = mobilenet_v3_small(weights=weights).eval()
+        from torchvision.models import (EfficientNet_B0_Weights, MobileNet_V3_Small_Weights,
+                                        efficientnet_b0, mobilenet_v3_small)
+        if MODEL_NAME == "mobilenet_v3_small":
+            weights = MobileNet_V3_Small_Weights.DEFAULT
+            model = mobilenet_v3_small(weights=weights).eval()
+            model_label = "MobileNetV3-Small (ImageNet)"
+        else:
+            weights = EfficientNet_B0_Weights.DEFAULT
+            model = efficientnet_b0(weights=weights).eval()
+            model_label = "EfficientNet-B0 (ImageNet)"
         with torch.inference_mode():
             scores = model(weights.transforms()(image).unsqueeze(0))[0].softmax(0)
         labels = weights.meta["categories"]
@@ -37,8 +45,8 @@ def classify(image: Image.Image, filename: str = ""):
         for category, words in INDEX.items():
             for score, label in hits:
                 if any(word in label.lower() for word in words):
-                    return category, round(min(0.98, max(0.51, score * 2.4)), 2), "MobileNetV3-Small (ImageNet)"
-        return "일반쓰레기", round(max(.51, float(scores.max())), 2), "MobileNetV3-Small (ImageNet)"
+                    return category, round(min(0.98, max(0.51, score * 2.4)), 2), model_label
+        return "일반쓰레기", round(max(.51, float(scores.max())), 2), model_label
     except (ImportError, ModuleNotFoundError):
         # Do not pretend that geometry alone is an image classifier.
         # A filename hint is useful for local smoke-tests, otherwise report unavailable.

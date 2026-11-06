@@ -23,3 +23,4 @@ test-images/
 # GitHub Actions self-hosted runner files (runner is normally installed outside this repo).
 actions-runner/
 _work/
+model-evaluation/
