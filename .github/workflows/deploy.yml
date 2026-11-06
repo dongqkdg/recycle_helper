@@ -68,7 +68,17 @@ jobs:
         run: |
           if [ -f deploy-evidence/monitor.pid ]; then
             kill "$(cat deploy-evidence/monitor.pid)" 2>/dev/null || true
+            for attempt in $(seq 1 15); do
+              if [ -f deploy-evidence/summary.md ] && grep -q "^# 분리수거 서비스 배포 검증" deploy-evidence/summary.md; then
+                break
+              fi
+              sleep 1
+            done
             wait "$(cat deploy-evidence/monitor.pid)" 2>/dev/null || true
+          fi
+          if [ ! -s deploy-evidence/summary.md ]; then
+            echo "# 분리수거 서비스 배포 검증" > deploy-evidence/summary.md
+            echo "모니터 요약 파일이 생성되지 않아 원문 로그만 제공합니다." >> deploy-evidence/summary.md
           fi
           echo "## 배포 실행 결과" >> deploy-evidence/summary.md
           echo "- 배포 단계: ${{ steps.deploy.outcome }}" >> deploy-evidence/summary.md
